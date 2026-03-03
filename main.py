@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import requests
 import logging
 from pyrogram import Client, filters
@@ -10,7 +11,8 @@ import config
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# Bot Client Setup
+# Bot Client Setup 
+# (Note: Pyromod automatically patches the Client)
 bot = Client(
     "QualityBot",
     api_id=config.API_ID,
@@ -36,7 +38,7 @@ def count_urls(file_path):
 
 @bot.on_message(filters.command(["start"]))
 async def start_handler(bot, m: Message):
-    await m.reply_text("नमस्ते! Quality Education बैच एक्सट्रैक्ट करने के लिए /qe कमांड का उपयोग करें।")
+    await m.reply_text("नमस्ते! Quality Education बैच निकालने के लिए /qe कमांड का उपयोग करें।")
 
 @bot.on_message(filters.command(["qe"]))
 async def quality_command_handler(bot, m: Message):
@@ -72,20 +74,25 @@ async def quality_command_handler(bot, m: Message):
         r2 = requests.get(f"https://test.qualityeducation.in/api/combo-get/318096/{bi}", headers=headers)
         j2 = r2.json()
 
+        # Check if data exists
+        if not j2.get("data") or not j2["data"].get("video"):
+            await update.edit_text("❌ इस ID के लिए कोई डाटा नहीं मिला।")
+            return
+
         dn = j2["data"]["video"][0].get("title", "Batch")
         file_name = f"{clean_filename(bi)}_{clean_filename(dn)}.txt"
 
-        # Step 4: Scraping Links without Encryption
+        # Step 4: Scraping Links WITHOUT Encryption
         with open(file_name, "w", encoding='utf-8') as f:
             for video_data in j2["data"]["video"]:
                 di = video_data.get("id")
                 r3 = requests.get(f"https://test.qualityeducation.in/api/subject-get/{di}", headers=headers)
                 j3 = r3.json()
-                for subject in j3["data"]:
+                for subject in j3.get("data", []):
                     ti = subject.get("id")
                     r4 = requests.get(f"https://test.qualityeducation.in/api/subject-get/{di}/{ti}", headers=headers)
                     j4 = r4.json()
-                    for content in j4["data"]:
+                    for content in j4.get("data", []):
                         topic = content.get("topic_name", "Untitled")
                         pdf = content.get("pdf_link")
                         v_links = [
@@ -113,12 +120,26 @@ async def quality_command_handler(bot, m: Message):
         )
 
         await m.reply_document(file_name, caption=caption)
-        os.remove(file_name) # साफ़-सफ़ाई के लिए फ़ाइल डिलीट करें
+        
+        # Cleanup
+        if os.path.exists(file_name):
+            os.remove(file_name)
         await update.delete()
 
     except Exception as e:
+        logging.error(f"Error: {e}")
         await m.reply_text(f"❌ Error: `{str(e)}`")
 
+# --- सुधारित स्टार्टअप सेक्शन ---
+async def start_bot():
+    await bot.start()
+    logging.info("--- BOT STARTED SUCCESSFULLY ---")
+    await asyncio.Event().wait()
+
 if __name__ == "__main__":
-    bot.run()
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(start_bot())
+    except KeyboardInterrupt:
+        logging.info("--- BOT STOPPED ---")
     
